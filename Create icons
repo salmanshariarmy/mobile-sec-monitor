@@ -1,0 +1,24 @@
+# In your repo root, run once:
+mkdir -p agent/data
+python3 -c "
+import struct, zlib
+def png(w, h, r, g, b, path):
+    raw = b''
+    for y in range(h):
+        raw += b'\x00'
+        for x in range(w):
+            raw += struct.pack('BBB', r, g, b)
+    def c(ctype, data):
+        c = ctype + data
+        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+    ihdr = struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)
+    idat = zlib.compress(raw)
+    with open(path, 'wb') as f:
+        f.write(b'\x89PNG\r\n\x1a\n')
+        f.write(c(b'IHDR', ihdr))
+        f.write(c(b'IDAT', idat))
+        f.write(c(b'IEND', b''))
+png(512, 512, 26, 26, 46, 'agent/data/icon.png')
+png(1024, 600, 26, 26, 46, 'agent/data/presplash.png')
+print('✅ Icons created')
+"
