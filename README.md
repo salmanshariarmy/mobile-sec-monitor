@@ -1,76 +1,98 @@
 # 🛡️ Mobile Security Monitor
 
-Real-time mobile threat detection + Discord alert bot.  
-Monitors **camera access**, **call logs**, and **SMS** for cybersecurity threats.
+Monitor your Android phone from anywhere in the world via Discord.
+Camera alerts, call monitoring, SMS analysis, network watch.
 
-## Architecture
-┌─────────────────┐ HTTPS/JSON ┌──────────────────┐ │ Android Agent │ ──────────────────> │ Discord Bot │ │ (Termux) │ │ (Python/FastAPI) │ │ - Camera Watch │ │ - Alert Receiver │ │ - Call Monitor │ │ - Slash Commands │ │ - SMS Analyzer │ │ - SQLite Storage │ │ - Network Watch│ │ - Role Pings │ └─────────────────┘ └────────┬─────────┘ │ ▼ ┌──────────────┐ │ Discord API │ │ (Embeds + DM)│ └──────────────┘
-
-## Features
-
-| Module | Detects | Severity |
-|---|---|---|
-| 📷 Camera Watcher | Background camera access, brief open/close bursts | 🔴 HIGH / 🟡 MED |
-| 📞 Call Monitor | Premium-rate numbers, call forwarding codes, repeated missed calls | 🔴 CRIT→LOW |
-| 💬 SMS Analyzer | Phishing keywords, suspicious URLs, credential harvesting, smishing | 🔴 CRIT / 🟠 HIGH |
-| 🌐 Network Watch | Unexpected connections, data exfiltration patterns | 🟠 HIGH / 🟡 MED |
-| 🚨 Discord Bot | Slash commands, real-time embeds, role pings, threat dashboard | All |
-
+## How It Works
+Your Phone (APK) ──HTTPS──> Railway (Bot Server) ──Discord API──> Your Discord Channel
 ## Quick Start
 
-### 1. Discord Bot (Server)
+### 1. Deploy Bot on Railway (5 min, free)
+
+[Click here to deploy](https://railway.app/new) → Select this repo → Set environment variables below → Done
+
+Required Variables:
+- `DISCORD_BOT_TOKEN` - Your Discord bot token
+- `GUILD_ID` - Your Discord server ID
+- `ALERT_CHANNEL_ID` - Channel where alerts appear
+- `HTTP_API_KEY` - Random secret key
+
+### 2. Build APK (20 min)
 
 ```bash
+sudo apt install -y git python3 python3-pip openjdk-17-jdk-headless
+pip install buildozer cython
 git clone https://github.com/YOUR_USER/mobile-sec-monitor.git
-cd mobile-sec-monitor/bot
-cp .env.example .env
-# Edit .env with your token & channel ID
-pip install -r requirements.txt
-python main.py
-2. Android Agent (Device)
-# On Android via Termux (F-Droid version recommended)
-pkg install git python -y
-git clone https://github.com/YOUR_USER/mobile-sec-monitor.git
-cd mobile-sec-monitor/agent
-chmod +x installer.sh
-./installer.sh
-# Follow prompts for bot URL & agent ID
-3. Docker (Production)
-docker-compose up -d
-Discord Commands
+cd mobile-sec-monitor
 
+# Edit your server URL
+nano agent/config_builtin.py
 
+# Build
+buildozer android debug
+
+# APK at: bin/SecurityMonitor-1.0.0-arm64-v8a-debug.apk
+3. Install on Phone → Grant Permissions → Done
 Command	Description
-/status	System health + last alert
-/alerts recent [count]	Last N alerts
-/alerts severity [level]	Filter by severity
-/dashboard	Interactive threat dashboard
-/summary [hours]	Threat summary chart
-/agent status	Ping connected agents
-/agent lockdown	Emergency device lockdown
+/status	System health
+/alerts recent 10	Last 10 alerts
+/dashboard	Interactive stats
+/summary 24	Last 24h summary
+/agent lockdown	Emergency stop
 /agent resume	Resume monitoring
-/block number	Block a phone number
-/whitelist app	Whitelist a camera app
-# ── 5. LICENSE ──
-cat > LICENSE << 'LICEOF'
-MIT License
 
-Copyright (c) 2026 Mobile Security Monitor
+License MIT
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+---
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+## FILE 3: `buildozer.spec` (Repo Root)
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+```ini
+[app]
+title = Security Monitor
+package.name = secmonitor
+package.domain = com.yourorg.security
+source.dir = agent/
+source.include_exts = py,png,jpg,kv,atlas,txt,json,xml
+requirements = python3,requests,phonenumbers,android,pyjnius,kivy
+
+version = 1.0.0
+version.code = 1
+
+presplash.filename = agent/data/presplash.png
+icon.filename = agent/data/icon.png
+orientation = portrait
+fullscreen = 0
+
+android.permissions = \
+    CAMERA, \
+    READ_CALL_LOG, \
+    READ_SMS, \
+    RECEIVE_SMS, \
+    READ_PHONE_STATE, \
+    INTERNET, \
+    ACCESS_NETWORK_STATE, \
+    ACCESS_WIFI_STATE, \
+    FOREGROUND_SERVICE, \
+    FOREGROUND_SERVICE_DATA_SYNC, \
+    RECEIVE_BOOT_COMPLETED, \
+    POST_NOTIFICATIONS, \
+    WAKE_LOCK
+
+android.api = 34
+android.minapi = 26
+android.sdk = 34
+android.ndk = 27b
+android.accept_sdk_license = True
+android.archs = arm64-v8a
+android.manifest = agent/AndroidManifest.xml
+android.presplash_color = #1a1a2e
+android.log_loglevel = 2
+android.copy_libs = 1
+android.p4a_branch = master
+android.enable_androidx = True
+android.use_gradle = True
+android.gradle_plugin_version = 8.2.0
+
+build.dir = build/
+bin.dir = bin/
