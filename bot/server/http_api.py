@@ -9,7 +9,7 @@ import logging
 from aiohttp import web
 import discord
 
-from ..config import Config
+from config import Config
 
 logger = logging.getLogger("http_api")
 
