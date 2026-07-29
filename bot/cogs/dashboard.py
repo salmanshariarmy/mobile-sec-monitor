@@ -1,99 +1,51 @@
-"""
-Dashboard and analytics commands.
-"""
 import discord
 from discord import app_commands
 from discord.ext import commands
-
 
 class DashboardCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="status", description="System health overview")
-    async def status(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        db = self.bot.db
-
-        # Summary stats
-        summary_24h = db.get_threat_summary(hours=24)
-        summary_7d = db.get_threat_summary(hours=168)
-        agents = db.get_agents()
-        recent = db.get_recent_threats(limit=1)
-
-        embed = discord.Embed(
-            title="🛡️ Mobile Security Monitor — Status",
-            color=discord.Color.green(),
-            timestamp=discord.utils.utcnow()
-        )
-
-        embed.add_field(name="🤖 Bot Status", value="✅ Online", inline=True)
-        embed.add_field(name="📡 Connected Agents", value=str(len(agents)), inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
-
-        embed.add_field(
-            name="📊 Threats (24h)",
-            value=f"Total: {summary_24h['total']}\n"
-                  f"🔴 Critical: {summary_24h['CRITICAL']}\n"
-                  f"🟠 High: {summary_24h['HIGH']}\n"
-                  f"🟡 Medium: {summary_24h['MEDIUM']}",
-            inline=True
-        )
-        embed.add_field(
-            name="📊 Threats (7d)",
-            value=f"Total: {summary_7d['total']}\n"
-                  f"🔴 Critical: {summary_7d['CRITICAL']}\n"
-                  f"🟠 High: {summary_7d['HIGH']}\n"
-                  f"🟡 Medium: {summary_7d['MEDIUM']}",
-            inline=True
-        )
-        embed.add_field(name="\u200b", value="\u200b", inline=True)
-
-        if recent:
-            last = recent[0]
-            embed.add_field(
-                name="🕐 Last Alert",
-                value=f"[{last['severity']}] {last['title']}\n{last['description'][:100]}",
-                inline=False
-            )
-
-        embed.set_footer(text=f"Agent API: {self.bot.http_host}:{self.bot.http_port}")
-        await interaction.followup.send(embed=embed)
-
-    @app_commands.command(name="summary", description="Threat summary for last N hours")
-    @app_commands.describe(hours="Hours to look back (default 24)")
-    async def summary(self, interaction: discord.Interaction, hours: int = 24):
-        await interaction.response.defer()
-        db = self.bot.db
-        summary = db.get_threat_summary(hours=hours)
-
-        embed = discord.Embed(
-            title=f"📈 Threat Summary — Last {hours}h",
-            color=discord.Color.blue(),
-            timestamp=discord.utils.utcnow()
-        )
-        embed.add_field(name="🔴 Critical", value=str(summary["CRITICAL"]), inline=True)
-        embed.add_field(name="🟠 High", value=str(summary["HIGH"]), inline=True)
-        embed.add_field(name="🟡 Medium", value=str(summary["MEDIUM"]), inline=True)
-        embed.add_field(name="🟢 Low", value=str(summary["LOW"]), inline=True)
-        embed.add_field(name="🔵 Info", value=str(summary["INFO"]), inline=True)
-        embed.add_field(name="📊 Total", value=str(summary["total"]), inline=True)
-        embed.set_footer(text="Severity breakdown")
-
-        await interaction.followup.send(embed=embed)
-
-    @app_commands.command(name="dashboard", description="Interactive threat dashboard link")
+    @app_commands.command(name="dashboard", description="Interactive threat dashboard")
     async def dashboard(self, interaction: discord.Interaction):
-        embed = discord.Embed(
-            title="📊 Web Dashboard",
-            description="Open the web dashboard in your browser for full analytics.\n\n"
-                        "**Comming soon:** Real-time graphs, agent maps, threat timeline.",
-            color=discord.Color.blue()
-        )
-        embed.add_field(name="Local Dashboard", value="http://localhost:8080", inline=True)
-        # In production: link to your actual hosted dashboard
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.response.defer()
+        embed = discord.Embed(title="🛡️ Security Monitor — Dashboard", color=discord.Color.blue(), timestamp=discord.utils.utcnow())
+        total = self.bot.db.count_alerts()
+        recent = self.bot.db.get_alerts_recent(hours=24)
+        agents = self.bot.db.get_agents()
+        embed.add_field(name="📊 Total Alerts", value=str(total), inline=True)
+        embed.add_field(name="📈 Last 24h", value=str(len(recent)), inline=True)
+        embed.add_field(name="📱 Agents", value=str(len(agents)), inline=True)
+        if recent:
+            crit = sum(1 for a in recent if a.get("severity") == "CRITICAL")
+            high = sum(1 for a in recent if a.get("severity") == "HIGH")
+            med = sum(1 for a in recent if a.get("severity") == "MEDIUM")
+            low = sum(1 for a in recent if a.get("severity") == "LOW")
+            embed.add_field(name="Severity (24h)", value=f"🔴 {crit} 🟠 {high} 🟡 {med} 🟢 {low}", inline=False)
+        view = DashboardView(self.bot)
+        await interaction.followup.send(embed=embed, view=view)
 
+class DashboardView(discord.ui.View):
+    def __init__(self, bot):
+        super().__init__(timeout=180)
+        self.bot = bot
+
+    @discord.ui.button(label="Last 10", style=discord.ButtonStyle.primary, emoji="📋")
+    async def last_ten(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        alerts = self.bot.db.get_alerts(limit=10)
+        if not alerts:
+            await interaction.followup.send("No alerts.", ephemeral=True)
+            return
+        text = "\n".join(f"[{a.get('severity','?')}] {a.get('title','?')}" for a in alerts)
+        await interaction.followup.send(f"**Last 10 Alerts:**\n{text}", ephemeral=True)
+
+    @discord.ui.button(label="Agents", style=discord.ButtonStyle.success, emoji="📱")
+    async def agents_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        agents = self.bot.db.get_agents()
+        text = "\n".join(f"{'🟢' if a.get('last_heartbeat') else '🔴'} {a.get('agent_id','?')}" for a in agents) or "None"
+        await interaction.followup.send(f"**Agents:**\n{text}", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(DashboardCog(bot))
