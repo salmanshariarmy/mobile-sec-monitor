@@ -7,7 +7,7 @@ from discord.ext import commands
 import aiohttp
 import json
 
-from ..config import Config
+from config import Config
 
 
 class CommandsCog(commands.Cog):
