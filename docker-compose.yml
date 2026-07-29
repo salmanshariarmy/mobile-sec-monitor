@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  discord-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    container_name: mobile-sec-bot
+    restart: unless-stopped
+    ports:
+      - "7879:7879"
+    volumes:
+      - ./bot/data:/app/data
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - GUILD_ID=${GUILD_ID}
+      - ALERT_CHANNEL_ID=${ALERT_CHANNEL_ID}
+      - ADMIN_ROLE_NAME=Security Admin
+      - HTTP_HOST=0.0.0.0
+      - HTTP_PORT=7879
+      - HTTP_API_KEY=${HTTP_API_KEY}
+      - DB_PATH=data/threats.db
+      - LOG_LEVEL=INFO
+      - AGENT_AUTH_TOKENS=${AGENT_AUTH_TOKENS}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
