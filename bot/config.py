@@ -14,7 +14,7 @@ class Config:
     ALERT_CHANNEL_ID: int = int(os.getenv("ALERT_CHANNEL_ID", "0"))
     ADMIN_ROLE_NAME: str = os.getenv("ADMIN_ROLE_NAME", "Security Admin")
     HTTP_HOST: str = os.getenv("HTTP_HOST", "0.0.0.0")
-    HTTP_PORT: int = int(os.getenv("HTTP_PORT", "7879"))
+    HTTP_PORT: int = int(os.getenv("HTTP_PORT", os.getenv("PORT", "7879")))
     HTTP_API_KEY: str = os.getenv("HTTP_API_KEY", "")
     DB_PATH: str = os.getenv("DB_PATH", "data/threats.db")
     AGENT_AUTH_TOKENS: dict = {}
