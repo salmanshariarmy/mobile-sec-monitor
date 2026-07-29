@@ -15,61 +15,42 @@ from config import Config
 from server.database import Database
 from server.http_api import AlertAPI
 
-# ── Logging ──
 logging.basicConfig(
     level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("main")
 
-
 class SecurityBot(commands.Bot):
-    """Extended bot with DB and HTTP API access."""
-
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
         intents.guilds = True
         intents.members = True
-
         super().__init__(
             command_prefix=commands.when_mentioned,
             intents=intents,
-            activity=discord.Activity(
-                type=discord.ActivityType.watching,
-                name="for mobile threats 🛡️"
-            )
+            activity=discord.Activity(type=discord.ActivityType.watching, name="for mobile threats 🛡️")
         )
-
         self.db = None
         self.http_api = None
         self.http_host = Config.HTTP_HOST
         self.http_port = Config.HTTP_PORT
 
     async def setup_hook(self):
-        """Initialize DB, HTTP API, load cogs."""
-        # Database
         self.db = Database()
         logger.info(f"Database initialized at {self.db.db_path}")
-
-        # Load cogs
         cog_dir = Path(__file__).parent / "cogs"
         for cog_file in cog_dir.glob("*.py"):
             if cog_file.name.startswith("_"):
                 continue
-            cog_name = f"cogs.{cog_file.stem}"
             try:
-                await self.load_extension(cog_name)
-                logger.info(f"Loaded cog: {cog_name}")
+                await self.load_extension(f"cogs.{cog_file.stem}")
+                logger.info(f"Loaded cog: {cog_file.stem}")
             except Exception as e:
-                logger.error(f"Failed to load {cog_name}: {e}")
-
-        # HTTP API
+                logger.error(f"Failed to load {cog_file.stem}: {e}")
         self.http_api = AlertAPI(self, self.db)
         await self.http_api.start()
-
-        # Sync commands
         await self.tree.sync()
         logger.info("Commands synced")
 
@@ -78,19 +59,15 @@ class SecurityBot(commands.Bot):
         logger.info(f"🌐 HTTP API: {self.http_host}:{self.http_port}")
         logger.info(f"📊 Total guilds: {len(self.guilds)}")
 
-
 async def main():
-    # Validate config
     try:
         Config.validate()
     except ValueError as e:
         logger.error(str(e))
         sys.exit(1)
-
     bot = SecurityBot()
     async with bot:
         await bot.start(Config.BOT_TOKEN)
-
 
 if __name__ == "__main__":
     try:
