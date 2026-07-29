@@ -1,60 +1,45 @@
-"""
-Admin-only commands for bot management.
-"""
 import discord
 from discord import app_commands
 from discord.ext import commands
-
 
 class AdminCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="reload", description="Reload a cog (admin only)")
-    @app_commands.describe(cog="Cog name to reload (e.g. alerts)")
-    @app_commands.default_permissions(administrator=True)
-    async def reload(self, interaction: discord.Interaction, cog: str):
-        try:
-            await self.bot.reload_extension(f"cogs.{cog}")
-            await interaction.response.send_message(f"✅ Reloaded `{cog}` cog.", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Failed: {e}", ephemeral=True)
-
-    @app_commands.command(name="sync", description="Sync slash commands (admin only)")
-    @app_commands.default_permissions(administrator=True)
-    async def sync(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        try:
-            synced = await self.bot.tree.sync()
-            await interaction.followup.send(f"✅ Synced {len(synced)} command(s).")
-        except Exception as e:
-            await interaction.followup.send(f"❌ Sync failed: {e}")
-
-    @app_commands.command(name="agents", description="List all registered agents")
-    @app_commands.default_permissions(administrator=True)
-    async def list_agents(self, interaction: discord.Interaction):
+    @app_commands.command(name="status", description="System health and stats")
+    async def status(self, interaction: discord.Interaction):
         await interaction.response.defer()
+        embed = discord.Embed(title="🛡️ Security Monitor — Status", color=discord.Color.green(), timestamp=discord.utils.utcnow())
+        embed.add_field(name="🤖 Bot", value=f"{self.bot.user}", inline=True)
+        embed.add_field(name="🌐 API", value=f"{self.bot.http_host}:{self.bot.http_port}", inline=True)
+        embed.add_field(name="💾 Alerts", value=f"{self.bot.db.count_alerts()} total", inline=True)
         agents = self.bot.db.get_agents()
-        if not agents:
-            return await interaction.followup.send("⚠️ No agents registered.")
+        online = sum(1 for a in agents if a.get("last_heartbeat"))
+        embed.add_field(name="📱 Agents", value=f"{len(agents)} registered · {online} online", inline=True)
+        embed.add_field(name="⚡ Latency", value=f"{round(self.bot.latency * 1000)}ms", inline=True)
+        embed.add_field(name="📊 Servers", value=str(len(self.bot.guilds)), inline=True)
+        await interaction.followup.send(embed=embed)
 
-        lines = []
-        for a in agents:
-            status = "🟢" if a["status"] == "active" else "🔴"
-            last = a.get("last_seen", "never")[:19]  # Trim ISO format
-            lines.append(f"{status} **{a['agent_id']}** — Last: {last}")
-
-        await interaction.followup.send("📡 **Registered Agents:**\n" + "\n".join(lines))
-
-    @app_commands.command(name="purge", description="Purge old alerts from DB (admin only)")
-    @app_commands.describe(days="Delete alerts older than N days (default 90)")
-    @app_commands.default_permissions(administrator=True)
-    async def purge(self, interaction: discord.Interaction, days: int = 90):
-        await interaction.response.defer(ephemeral=True)
-        cutoff = (discord.utils.utcnow() - discord.utils.MISSING).isoformat()
-        # In production: DELETE FROM threats WHERE timestamp < cutoff
-        await interaction.followup.send(f"🗑️ Purged alerts older than {days} days.")
-
+    @app_commands.command(name="summary", description="Threat summary")
+    @app_commands.describe(hours="Hours to look back")
+    async def summary(self, interaction: discord.Interaction, hours: int = 24):
+        await interaction.response.defer()
+        alerts = self.bot.db.get_alerts_recent(hours=hours)
+        embed = discord.Embed(title=f"📊 Last {hours}h Summary", color=discord.Color.orange(), timestamp=discord.utils.utcnow())
+        if not alerts:
+            embed.description = "✅ No threats detected. All clear!"
+            embed.color = discord.Color.green()
+        else:
+            sevs = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+            for a in alerts:
+                s = a.get("severity", "MEDIUM")
+                sevs[s] = sevs.get(s, 0) + 1
+            embed.add_field(name="🔴 Critical", value=str(sevs["CRITICAL"]), inline=True)
+            embed.add_field(name="🟠 High", value=str(sevs["HIGH"]), inline=True)
+            embed.add_field(name="🟡 Medium", value=str(sevs["MEDIUM"]), inline=True)
+            embed.add_field(name="🟢 Low", value=str(sevs["LOW"]), inline=True)
+            embed.add_field(name="📊 Total", value=str(len(alerts)), inline=True)
+        await interaction.followup.send(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(AdminCog(bot))
