@@ -15,3 +15,5 @@ bin/
 .buildozer/
 .DS_Store
 nohup.out
+.DS_Store
+*.swp
