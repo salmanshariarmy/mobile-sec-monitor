@@ -10,7 +10,7 @@ class AdminCog(commands.Cog):
     async def status(self, interaction: discord.Interaction):
         await interaction.response.defer()
         embed = discord.Embed(title="🛡️ Security Monitor — Status", color=discord.Color.green(), timestamp=discord.utils.utcnow())
-        embed.add_field(name="🤖 Bot", value=f"{self.bot.user}", inline=True)
+        embed.add_field(name="🤖 Bot", value=str(self.bot.user), inline=True)
         embed.add_field(name="🌐 API", value=f"{self.bot.http_host}:{self.bot.http_port}", inline=True)
         embed.add_field(name="💾 Alerts", value=f"{self.bot.db.count_alerts()} total", inline=True)
         agents = self.bot.db.get_agents()
