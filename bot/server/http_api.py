@@ -1,138 +1,98 @@
-"""
-FastAPI HTTP server that receives alerts from Android agents.
-Runs alongside the Discord bot.
-"""
-import asyncio
-import datetime
-import logging
-
+import json, logging, time
 from aiohttp import web
-import discord
-
-from config import Config
 
 logger = logging.getLogger("http_api")
 
-
 class AlertAPI:
-    """HTTP handler for agent alerts."""
-
-    def __init__(self, bot: discord.Client, db):
+    def __init__(self, bot, db):
         self.bot = bot
         self.db = db
         self.app = web.Application()
+        self.runner = None
+        self._setup_routes()
+
+    def _setup_routes(self):
         self.app.router.add_post("/alert", self.handle_alert)
         self.app.router.add_post("/agent/heartbeat", self.handle_heartbeat)
+        self.app.router.add_get("/agent/commands", self.handle_commands)
         self.app.router.add_get("/health", self.handle_health)
+        self.app.router.add_get("/", self.handle_root)
 
-    async def _verify_auth(self, request) -> tuple[str, str] | None:
-        """Verify agent authentication. Returns (agent_id, error_msg) or raises."""
+    def _check_auth(self, request):
         api_key = request.headers.get("X-API-Key", "")
-        agent_id = request.headers.get("X-Agent-ID", "unknown")
-
-        if not Config.is_agent_authorized(agent_id, api_key):
-            return None, "Unauthorized — invalid API key or agent ID"
-        return agent_id, None
+        from config import Config
+        return api_key == Config.HTTP_API_KEY, request.headers.get("X-Agent-ID", "unknown")
 
     async def handle_alert(self, request):
-        """Receive and process a security alert from an agent."""
-        agent_id, err = await self._verify_auth(request)
-        if err:
-            return web.Response(status=403, text=err)
-
         try:
-            data = await request.json()
-        except Exception:
-            return web.Response(status=400, text="Invalid JSON")
-
-        alert = {
-            "agent_id": agent_id or data.get("agent_id", "unknown"),
-            "title": data.get("title", "Untitled Alert"),
-            "description": data.get("description", ""),
-            "severity": data.get("severity", "MEDIUM").upper(),
-            "timestamp": data.get("timestamp", datetime.datetime.utcnow().isoformat()),
-            "details": data.get("details", {}),
-        }
-
-        # Store in database
-        self.db.insert_threat(**alert)
-
-        # Update agent last-seen
-        self.db.upsert_agent(alert["agent_id"], data.get("device_info"))
-
-        # Send to Discord
+            payload = await request.json()
+        except:
+            return web.json_response({"error": "Invalid JSON"}, status=400)
+        valid, agent_id = self._check_auth(request)
+        if not valid:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        alert_id = self.db.save_alert(payload)
         try:
-            await self._send_discord_alert(alert)
-        except Exception as e:
-            logger.error(f"Failed to send Discord alert: {e}")
-
-        logger.info(f"Alert received: [{alert['severity']}] {alert['title']} from {alert['agent_id']}")
-        return web.Response(status=200, text="OK")
+            channel = self.bot.get_channel(int(os.getenv("ALERT_CHANNEL_ID", "0")))
+            if channel:
+                embed = self._build_embed(payload)
+                await channel.send(embed=embed)
+        except:
+            pass
+        return web.json_response({"status": "ok", "alert_id": alert_id})
 
     async def handle_heartbeat(self, request):
-        """Agent heartbeat / keep-alive."""
-        agent_id, err = await self._verify_auth(request)
-        if err:
-            return web.Response(status=403, text=err)
-
-        device_info = {}
         try:
-            data = await request.json()
-            device_info = data.get("device_info", {})
-        except Exception:
-            pass
+            payload = await request.json()
+        except:
+            payload = {}
+        valid, agent_id = self._check_auth(request)
+        if not valid:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        self.db.register_agent(agent_id, payload.get("device_info"))
+        return web.json_response({"status": "ok"})
 
-        self.db.upsert_agent(agent_id or "unknown", device_info)
-        return web.Response(status=200, text="OK")
+    async def handle_commands(self, request):
+        valid, agent_id = self._check_auth(request)
+        if not valid:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        cmds = self.db.get_pending_commands(agent_id)
+        return web.json_response({"commands": cmds})
 
     async def handle_health(self, request):
-        return web.Response(status=200, text="OK")
+        return web.json_response({"status": "healthy", "alerts": self.db.count_alerts()})
 
-    async def _send_discord_alert(self, alert: dict):
-        """Build and send a Discord embed."""
-        channel = self.bot.get_channel(Config.ALERT_CHANNEL_ID)
-        if not channel:
-            logger.warning(f"Alert channel {Config.ALERT_CHANNEL_ID} not found")
-            return
+    async def handle_root(self, request):
+        return web.json_response({"service": "Mobile Security Monitor", "version": "1.0.0"})
 
-        SEVERITY_COLORS = {
-            "CRITICAL": 0xFF0000,
-            "HIGH": 0xFF6600,
-            "MEDIUM": 0xFFCC00,
-            "LOW": 0x66CC66,
-            "INFO": 0x3399FF,
+    def _build_embed(self, alert):
+        sev = alert.get("severity", "MEDIUM").upper()
+        colors = {"CRITICAL": 0xFF0000, "HIGH": 0xFF6600, "MEDIUM": 0xFFAA00, "LOW": 0x00FF00}
+        emojis = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}
+        embed = {
+            "title": f"{emojis.get(sev,'⚪')} {alert.get('title','Alert')}",
+            "description": alert.get("description", ""),
+            "color": colors.get(sev, 0x3498DB),
+            "fields": [
+                {"name": "Severity", "value": sev, "inline": True},
+                {"name": "Agent", "value": alert.get("agent_id","?"), "inline": True},
+                {"name": "Time", "value": alert.get("timestamp","")[:19], "inline": True}
+            ],
+            "footer": {"text": "Mobile Security Monitor"},
+            "timestamp": alert.get("timestamp", "")
         }
-
-        sev = alert["severity"].upper()
-        color = SEVERITY_COLORS.get(sev, 0x3399FF)
-        ts = datetime.datetime.fromisoformat(alert["timestamp"])
-
-        embed = discord.Embed(
-            title=f"🚨 {alert['title']}",
-            description=alert["description"],
-            color=color,
-            timestamp=ts,
-        )
-        for key, value in alert["details"].items():
-            embed.add_field(
-                name=key.replace("_", " ").title(),
-                value=str(value)[:1024],
-                inline=True
-            )
-        embed.set_footer(text=f"{sev} | Agent: {alert['agent_id']}")
-
-        await channel.send(embed=embed)
-
-        # Ping admin role for critical/high
-        if sev in ("CRITICAL", "HIGH"):
-            guild = channel.guild
-            role = discord.utils.get(guild.roles, name=Config.ADMIN_ROLE_NAME)
-            if role:
-                await channel.send(f"{role.mention} — {alert['title']}")
+        details = alert.get("details", {})
+        if isinstance(details, dict):
+            for k, v in list(details.items())[:3]:
+                embed["fields"].append({"name": k.capitalize(), "value": str(v)[:200], "inline": True})
+        return embed
 
     async def start(self):
-        runner = web.AppRunner(self.app)
-        await runner.setup()
-        site = web.TCPSite(runner, Config.HTTP_HOST, Config.HTTP_PORT)
+        self.runner = web.AppRunner(self.app)
+        await self.runner.setup()
+        site = web.TCPSite(self.runner, self.bot.http_host, self.bot.http_port)
         await site.start()
-        logger.info(f"HTTP API listening on {Config.HTTP_HOST}:{Config.HTTP_PORT}")
+        logger.info(f"🌐 HTTP API on {self.bot.http_host}:{self.bot.http_port}")
+
+    async def stop(self):
+        if self.runner: await self.runner.cleanup()
