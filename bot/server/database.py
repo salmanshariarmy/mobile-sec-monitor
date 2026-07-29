@@ -1,121 +1,106 @@
-"""
-SQLite database for threat storage and analytics.
-"""
-import sqlite3
-import json
-import datetime
-import threading
+import json, logging, os, sqlite3, time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from config import Config
-
-_lock = threading.Lock()
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS threats (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_id    TEXT NOT NULL,
-    title       TEXT NOT NULL,
-    description TEXT NOT NULL,
-    severity    TEXT NOT NULL DEFAULT 'MEDIUM',
-    details     TEXT DEFAULT '{}',
-    timestamp   TEXT NOT NULL,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS agents (
-    agent_id    TEXT PRIMARY KEY,
-    last_seen   TEXT,
-    device_info TEXT DEFAULT '{}',
-    status      TEXT DEFAULT 'active'
-);
-
-CREATE INDEX IF NOT EXISTS idx_threats_severity ON threats(severity);
-CREATE INDEX IF NOT EXISTS idx_threats_timestamp ON threats(timestamp);
-CREATE INDEX IF NOT EXISTS idx_threats_agent ON threats(agent_id);
-"""
-
+logger = logging.getLogger("database")
 
 class Database:
     def __init__(self, db_path: str = None):
-        self.db_path = db_path or Config.DB_PATH
-        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        with _lock:
-            self._conn.executescript(SCHEMA)
-            self._conn.commit()
+        if db_path is None:
+            db_path = os.getenv("DB_PATH", "data/threats.db")
+        self.db_path = db_path
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.conn.row_factory = sqlite3.Row
+        self._init_tables()
 
-    def insert_threat(self, agent_id: str, title: str, description: str,
-                      severity: str, details: dict, timestamp: str) -> int:
-        with _lock:
-            cur = self._conn.execute(
-                """INSERT INTO threats (agent_id, title, description, severity, details, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (agent_id, title, description, severity.upper(),
-                 json.dumps(details), timestamp)
-            )
-            self._conn.commit()
-            return cur.lastrowid
+    def _init_tables(self):
+        self.conn.executescript("""
+            CREATE TABLE IF NOT EXISTS alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, description TEXT,
+                severity TEXT DEFAULT 'MEDIUM', timestamp TEXT, details TEXT,
+                agent_id TEXT, device_info TEXT);
+            CREATE TABLE IF NOT EXISTS agents (
+                agent_id TEXT PRIMARY KEY, last_heartbeat TEXT, device_info TEXT,
+                status TEXT DEFAULT 'offline', registered_at TEXT DEFAULT (datetime('now')));
+            CREATE TABLE IF NOT EXISTS commands (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT, command TEXT,
+                status TEXT DEFAULT 'pending', created_at TEXT DEFAULT (datetime('now')));
+            CREATE TABLE IF NOT EXISTS blocked_numbers (
+                number TEXT PRIMARY KEY, added_at TEXT DEFAULT (datetime('now')));
+            CREATE TABLE IF NOT EXISTS whitelisted_apps (
+                package TEXT PRIMARY KEY, added_at TEXT DEFAULT (datetime('now')));
+            CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(timestamp);
+        """)
+        self.conn.commit()
 
-    def get_recent_threats(self, limit: int = 25, offset: int = 0,
-                           severity: Optional[str] = None,
-                           agent_id: Optional[str] = None) -> list:
-        query = "SELECT * FROM threats WHERE 1=1"
-        params = []
-        if severity:
-            query += " AND severity = ?"
-            params.append(severity.upper())
-        if agent_id:
-            query += " AND agent_id = ?"
-            params.append(agent_id)
-        query += " ORDER BY id DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
-        with _lock:
-            rows = self._conn.execute(query, params).fetchall()
-        return [dict(r) for r in rows]
+    def save_alert(self, alert: dict) -> int:
+        c = self.conn.cursor()
+        c.execute("INSERT INTO alerts (title,description,severity,timestamp,details,agent_id,device_info) VALUES (?,?,?,?,?,?,?)",
+                  (alert.get("title","Alert"), alert.get("description",""),
+                   alert.get("severity","MEDIUM"), alert.get("timestamp",time.strftime("%Y-%m-%dT%H:%M:%S")),
+                   json.dumps(alert.get("details",{})), alert.get("agent_id","unknown"),
+                   json.dumps(alert.get("device_info",{}))))
+        self.conn.commit()
+        return c.lastrowid
 
-    def get_threat_summary(self, hours: int = 24) -> dict:
-        cutoff = (datetime.datetime.utcnow() - datetime.timedelta(hours=hours)).isoformat()
-        with _lock:
-            rows = self._conn.execute(
-                """SELECT severity, COUNT(*) as cnt
-                   FROM threats
-                   WHERE timestamp > ?
-                   GROUP BY severity""",
-                (cutoff,)
-            ).fetchall()
-        summary = {"total": 0, "CRITICAL": 0, "HIGH": 0,
-                   "MEDIUM": 0, "LOW": 0, "INFO": 0, "hours": hours}
-        for r in rows:
-            sev = r["severity"]
-            cnt = r["cnt"]
-            summary[sev] = cnt
-            summary["total"] += cnt
-        return summary
+    def get_alerts(self, limit=25, severity=None, agent_id=None) -> list:
+        c = self.conn.cursor()
+        q = "SELECT * FROM alerts WHERE 1=1"
+        p = []
+        if severity: q += " AND severity = ?"; p.append(severity.upper())
+        if agent_id: q += " AND agent_id = ?"; p.append(agent_id)
+        q += " ORDER BY timestamp DESC LIMIT ?"; p.append(limit)
+        c.execute(q, p)
+        return [dict(r) for r in c.fetchall()]
 
-    def upsert_agent(self, agent_id: str, device_info: dict = None):
-        with _lock:
-            now = datetime.datetime.utcnow().isoformat()
-            info_str = json.dumps(device_info) if device_info else "{}"
-            self._conn.execute(
-                """INSERT INTO agents (agent_id, last_seen, device_info, status)
-                   VALUES (?, ?, ?, 'active')
-                   ON CONFLICT(agent_id) DO UPDATE SET
-                       last_seen = excluded.last_seen,
-                       device_info = excluded.device_info,
-                       status = 'active'""",
-                (agent_id, now, info_str)
-            )
-            self._conn.commit()
+    def get_alerts_recent(self, hours=24) -> list:
+        cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+        c = self.conn.cursor()
+        c.execute("SELECT * FROM alerts WHERE timestamp >= ? ORDER BY timestamp DESC", (cutoff,))
+        return [dict(r) for r in c.fetchall()]
+
+    def count_alerts(self) -> int:
+        c = self.conn.cursor()
+        c.execute("SELECT COUNT(*) as c FROM alerts")
+        return c.fetchone()["c"]
+
+    def register_agent(self, agent_id: str, device_info: dict = None):
+        c = self.conn.cursor()
+        c.execute("""INSERT INTO agents (agent_id,last_heartbeat,device_info,status)
+                     VALUES (?,datetime('now'),?,'online')
+                     ON CONFLICT(agent_id) DO UPDATE SET last_heartbeat=datetime('now'),device_info=?,status='online'""",
+                  (agent_id, json.dumps(device_info or {}), json.dumps(device_info or {})))
+        self.conn.commit()
 
     def get_agents(self) -> list:
-        with _lock:
-            rows = self._conn.execute(
-                "SELECT * FROM agents ORDER BY last_seen DESC"
-            ).fetchall()
-        return [dict(r) for r in rows]
+        c = self.conn.cursor()
+        c.execute("SELECT * FROM agents ORDER BY last_heartbeat DESC")
+        return [dict(r) for r in c.fetchall()]
 
-    def close(self):
-        self._conn.close()
+    def get_agent(self, agent_id: str) -> Optional[dict]:
+        c = self.conn.cursor()
+        c.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,))
+        r = c.fetchone()
+        return dict(r) if r else None
+
+    def queue_command(self, agent_id: str, command: str):
+        c = self.conn.cursor()
+        c.execute("INSERT INTO commands (agent_id,command,status) VALUES (?,?,'pending')", (agent_id, command))
+        self.conn.commit()
+
+    def get_pending_commands(self, agent_id: str) -> list:
+        c = self.conn.cursor()
+        c.execute("SELECT * FROM commands WHERE agent_id=? AND status='pending' ORDER BY created_at ASC", (agent_id,))
+        cmds = [dict(r) for r in c.fetchall()]
+        for cmd in cmds:
+            c.execute("UPDATE commands SET status='executed' WHERE id=?", (cmd["id"],))
+        self.conn.commit()
+        return cmds
+
+    def add_blocked_number(self, number: str):
+        self.conn.execute("INSERT OR IGNORE INTO blocked_numbers (number) VALUES (?)", (number,)); self.conn.commit()
+
+    def add_whitelisted_app(self, package: str):
+        self.conn.execute("INSERT OR IGNORE INTO whitelisted_apps (package) VALUES (?)", (package,)); self.conn.commit()
