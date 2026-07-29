@@ -139,8 +139,5 @@ bin.dir = bin/
 # (str) Android archs to build for
 android.arch = arm64-v8a
 
-# (list) The Android Java classes to bundle
-android.add_src =
-
 # (bool) If True, then the app will use the default keyboard
 android.use_default_keyboard = True
