@@ -1,0 +1,10 @@
+{
+  "build": {
+    "builder": "NIXPACKS",
+    "buildCommand": "cd bot && pip install -r requirements.txt"
+  },
+  "deploy": {
+    "startCommand": "cd bot && python main.py",
+    "restartPolicyType": "ALWAYS"
+  }
+}
