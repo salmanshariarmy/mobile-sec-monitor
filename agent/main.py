@@ -49,6 +49,12 @@ class MonitorUI(BoxLayout):
     def _connection_worker(self):
         try:
             import requests
+            import urllib3
+
+            # Disable SSL warnings for self-test
+            urllib3.disable_warnings(
+                urllib3.exceptions.InsecureRequestWarning
+            )
 
             if "your-" in BOT_URL or "CHANGE_THIS" in API_KEY:
                 raise ValueError(
@@ -68,6 +74,7 @@ class MonitorUI(BoxLayout):
                     "X-Agent-ID": AGENT_ID,
                 },
                 timeout=20,
+                verify=False,
             )
 
             message = (
