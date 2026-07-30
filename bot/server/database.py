@@ -358,6 +358,7 @@ class Database:
 
         return c.fetchone()["c"]
 
+        HEAD
 
 
     def register_agent(
@@ -503,7 +504,24 @@ class Database:
 
 
         self.conn.commit()
+=======
+    def register_agent(self, agent_id: str, device_info: dict = None):
+    c = self.conn.cursor()
 
+    info = json.dumps(device_info or {})
+
+    c.execute("""
+        INSERT INTO agents
+        (agent_id, last_heartbeat, device_info, status)
+        VALUES (?, datetime('now'), ?, 'online')
+        ON CONFLICT(agent_id)
+        DO UPDATE SET
+            last_heartbeat=datetime('now'),
+            device_info=?,
+            status='online'
+    """, (agent_id, info, info))
+
+    self.conn.commit()
 
 
     def get_pending_commands(
