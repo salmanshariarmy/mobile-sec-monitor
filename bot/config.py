@@ -17,7 +17,7 @@ class Config:
     HTTP_PORT: int = int(os.getenv("HTTP_PORT", os.getenv("PORT", "7879")))
     HTTP_API_KEY: str = os.getenv("HTTP_API_KEY", "")
     DB_PATH: str = os.getenv("DB_PATH", "data/threats.db")
-    AGENT_AUTH_TOKENS: dict = {}
+    AGENT_AUTH_TOKENS = os.getenv("AGENT_AUTH_TOKENS", "")
 
     @classmethod
     def validate(cls):
