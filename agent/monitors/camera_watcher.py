@@ -2,17 +2,20 @@
 Camera access monitor.
 Detects when apps activate the camera unexpectedly via logcat.
 """
+
 import logging
 import re
 import subprocess
 import threading
 import time
 import datetime
+import os
 
 logger = logging.getLogger("camera_watcher")
 
 
 class CameraWatcher:
+
     def __init__(self, alert_callback, config):
         self.alert = alert_callback
         self.config = config
@@ -20,140 +23,374 @@ class CameraWatcher:
         self.open_sessions = {}
         self._lock = threading.Lock()
 
+
     def get_foreground_app(self) -> str:
-        """Get the currently focused app package."""
+        """
+        Get currently focused application.
+        """
+
         try:
+
             output = subprocess.check_output(
-                ["dumpsys", "window", "windows"],
-                timeout=5, text=True, stderr=subprocess.DEVNULL
+                [
+                    "dumpsys",
+                    "window",
+                    "windows"
+                ],
+                timeout=5,
+                text=True,
+                stderr=subprocess.DEVNULL
             )
-            # Try multiple patterns
-            for pattern in [
+
+
+            patterns = [
                 r"mCurrentFocus.*?([\w.]+)/",
                 r"mFocusedApp.*?([\w.]+)/",
-                r"mInputMethod.*?([\w.]+)/",
-            ]:
-                match = re.search(pattern, output)
+            ]
+
+
+            for pattern in patterns:
+
+                match = re.search(
+                    pattern,
+                    output
+                )
+
                 if match:
                     return match.group(1)
+
+
         except Exception:
             pass
+
+
         return "unknown"
 
+
+
+    def capture_photo(self):
+
+        """
+        Request camera capture.
+        Android may require user interaction.
+        """
+
+        try:
+
+            filename = (
+                f"/sdcard/DCIM/"
+                f"security_{int(time.time())}.jpg"
+            )
+
+
+            subprocess.Popen(
+                [
+                    "am",
+                    "start",
+                    "-a",
+                    "android.media.action.IMAGE_CAPTURE",
+                    "--output",
+                    filename
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+
+
+            logger.info(
+                "Camera capture requested: %s",
+                filename
+            )
+
+
+            return filename
+
+
+        except Exception as e:
+
+            logger.error(
+                "Capture failed: %s",
+                e
+            )
+
+            return None
+
+
+
+
     def run(self):
-        """Continuously monitor logcat for camera events."""
+
         self.running = True
 
-        # Start logcat with camera filters
+
+        logger.info(
+            "Camera watcher monitoring logcat..."
+        )
+
+
         try:
+
             proc = subprocess.Popen(
-                ["logcat", "-s", "CameraService", "Camera2Client",
-                 "CameraHal", "CamX", "CHIUSECallbacks"],
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                text=True, bufsize=1,
+                [
+                    "logcat",
+                    "-s",
+                    "CameraService",
+                    "Camera2Client",
+                    "CameraHal",
+                    "CamX",
+                    "CHIUSECallbacks"
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1
             )
-        except FileNotFoundError:
-            logger.error("logcat not available — camera monitoring disabled")
+
+
+        except Exception as e:
+
+            logger.error(
+                "Cannot start logcat: %s",
+                e
+            )
+
             return
 
-        logger.info("Camera watcher monitoring logcat...")
 
-        for line in iter(proc.stdout.readline, ""):
+
+        for line in iter(
+            proc.stdout.readline,
+            ""
+        ):
+
             if not self.running:
                 break
 
-            # Pattern 1: Camera opened by package
+
+            now = datetime.datetime.utcnow().isoformat()
+
+
             open_match = re.search(
                 r"Camera\s+(\d+)\s+opened\s+by\s+(?:package\s+)?([^\s,]+)",
                 line
             )
-            # Pattern 2: connect() called by package
+
+
             connect_match = re.search(
-                r"connect\s*\(\)\s*.*Client\s*\(([^)]+)\)",
-                line
-            )
-            # Pattern 3: Stream configuration (indicates active camera use)
-            stream_match = re.search(
-                r"configureStreams.*Camera\s+(\d+)\s+.*?([\w.]+)",
+                r"connect\s*\(\).*Client\s*\(([^)]+)\)",
                 line
             )
 
-            now = datetime.datetime.utcnow().isoformat()
+
+            close_match = re.search(
+                r"Camera\s+(\d+)\s+closed",
+                line
+            )
+
+
 
             with self._lock:
+
+
                 if open_match:
-                    self._handle_open(open_match.group(1), open_match.group(2), now)
+
+                    self._handle_open(
+                        open_match.group(1),
+                        open_match.group(2),
+                        now
+                    )
+
+
                 elif connect_match:
-                    self._handle_open("0", connect_match.group(1), now)
-                elif stream_match:
-                    self._handle_open(stream_match.group(1), stream_match.group(2), now)
 
-                # Check for close patterns
-                close_match = re.search(r"Camera\s+(\d+)\s+closed", line)
+                    self._handle_open(
+                        "0",
+                        connect_match.group(1),
+                        now
+                    )
+
+
                 if close_match:
-                    self._handle_close(close_match.group(1), now)
 
-    def _handle_open(self, cam_id: str, package: str, timestamp: str):
-        """Process a camera open event."""
+                    self._handle_close(
+                        close_match.group(1),
+                        now
+                    )
+
+
+
+
+
+    def _handle_open(
+        self,
+        cam_id,
+        package,
+        timestamp
+    ):
+
+
         foreground = self.get_foreground_app()
+
+
         self.open_sessions[cam_id] = {
+
             "package": package,
+
             "foreground": foreground,
-            "timestamp": timestamp,
+
+            "timestamp": timestamp
+
         }
 
-        # Determine if suspicious
-        is_suspicious = False
+
+
+        if package in self.config.camera_whitelist:
+
+            return
+
+
+
+        suspicious = False
+
         reasons = []
 
-        # Check if package is whitelisted
-        if package in self.config.camera_whitelist:
-            return  # All good
 
-        # Background access
+
         if package != foreground:
-            is_suspicious = True
-            reasons.append(f"Background access by {package} (foreground: {foreground})")
 
-        # Unknown package accessing camera
-        if not package.startswith("com.") and not package.startswith("org."):
-            is_suspicious = True
-            reasons.append(f"Non-standard package: {package}")
+            suspicious = True
 
-        if is_suspicious:
+            reasons.append(
+                f"Background camera access: {package}"
+            )
+
+
+
+        if suspicious:
+
+
+            photo = self.capture_photo()
+
+
+
             self.alert({
-                "title": "📷 Suspicious Camera Access",
-                "description": "; ".join(reasons),
-                "severity": "HIGH",
-                "timestamp": timestamp,
+
+                "title":
+                "📷 Suspicious Camera Access",
+
+
+                "description":
+                "; ".join(reasons),
+
+
+                "severity":
+                "HIGH",
+
+
+                "timestamp":
+                timestamp,
+
+
                 "details": {
+
                     "camera_id": cam_id,
+
                     "package": package,
+
                     "foreground_app": foreground,
+
+                    "photo_path": photo
+
                 }
+
             })
 
-    def _handle_close(self, cam_id: str, timestamp: str):
-        """Process a camera close event and detect brief access."""
-        if cam_id in self.open_sessions:
-            session = self.open_sessions[cam_id]
-            try:
-                start_ts = datetime.datetime.fromisoformat(session["timestamp"])
-                end_ts = datetime.datetime.fromisoformat(timestamp)
-                duration = (end_ts - start_ts).total_seconds()
 
-                if 0 < duration < 0.5:  # Brief access (< 0.5s)
-                    self.alert({
-                        "title": "📷 Brief Camera Access",
-                        "description": f"Camera {cam_id} opened for {duration:.2f}s by {session['package']}",
-                        "severity": "MEDIUM",
-                        "timestamp": timestamp,
-                        "details": {
-                            "camera_id": cam_id,
-                            "package": session["package"],
-                            "duration_sec": round(duration, 2),
-                        }
-                    })
-            except Exception:
-                pass
-            del self.open_sessions[cam_id]
+
+
+
+
+    def _handle_close(
+        self,
+        cam_id,
+        timestamp
+    ):
+
+
+        if cam_id not in self.open_sessions:
+
+            return
+
+
+
+        session = self.open_sessions[cam_id]
+
+
+        try:
+
+            start = datetime.datetime.fromisoformat(
+                session["timestamp"]
+            )
+
+
+            end = datetime.datetime.fromisoformat(
+                timestamp
+            )
+
+
+            duration = (
+                end-start
+            ).total_seconds()
+
+
+
+            if duration < 0.5:
+
+
+                self.alert({
+
+                    "title":
+                    "📷 Brief Camera Access",
+
+
+                    "description":
+                    (
+                        f"Camera opened "
+                        f"{duration:.2f}s "
+                        f"by {session['package']}"
+                    ),
+
+
+                    "severity":
+                    "MEDIUM",
+
+
+                    "timestamp":
+                    timestamp,
+
+
+                    "details": {
+
+                        "camera_id": cam_id,
+
+                        "package":
+                        session["package"],
+
+                        "duration":
+                        duration
+
+                    }
+
+                })
+
+
+        except Exception as e:
+
+            logger.error(
+                "Close handler error %s",
+                e
+            )
+
+
+
+        del self.open_sessions[cam_id]
