@@ -27,7 +27,7 @@ class AlertAPI:
         self.app.router.add_post("/alert", self.handle_alert)
         self.app.router.add_post("/alert/image", self.handle_alert_image)
         self.app.router.add_post("/agent/heartbeat", self.handle_heartbeat)
-        self.app.router.add_post("/agent/data", self.handle_agent_data)      # ← NEW
+        self.app.router.add_post("/agent/data", self.handle_agent_data)
         self.app.router.add_get("/agent/commands", self.handle_commands)
         self.app.router.add_get("/health", self.handle_health)
         self.app.router.add_get("/", self.handle_root)
@@ -39,13 +39,19 @@ class AlertAPI:
         if not agent_id or not supplied_token:
             return False, ""
 
-        raw = getattr(Config, "AGENT_AUTH_TOKENS", "")
-        agent_tokens = {}
-        if raw:
+        raw = getattr(Config, "AGENT_AUTH_TOKENS", {})
+
+        # Support both dict and legacy string formats
+        if isinstance(raw, dict):
+            agent_tokens = raw
+        elif isinstance(raw, str):
+            agent_tokens = {}
             for pair in raw.split(","):
                 if ":" in pair:
                     aid, tok = pair.split(":", 1)
                     agent_tokens[aid.strip()] = tok.strip()
+        else:
+            agent_tokens = {}
 
         expected_token = agent_tokens.get(agent_id)
         if expected_token and hmac.compare_digest(supplied_token, expected_token):
@@ -114,7 +120,6 @@ class AlertAPI:
         await self._send_discord_image(payload, image_data)
         return web.json_response({"status": "ok", "alert_id": alert_id}, status=201)
 
-    # ── NEW: handle_agent_data ──────────────────────────────────────────────
     async def handle_agent_data(self, request: web.Request) -> web.Response:
         valid, agent_id = self._check_auth(request)
 
