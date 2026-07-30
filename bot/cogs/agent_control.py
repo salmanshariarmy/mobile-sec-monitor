@@ -6,14 +6,14 @@ class AgentControlCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="agent", description="Control agents")
+    @app_commands.command(name="agents", description="Control agents")
     @app_commands.describe(action="list, lockdown, resume", agent_id="Target agent ID")
     @app_commands.choices(action=[
         app_commands.Choice(name="list", value="list"),
         app_commands.Choice(name="lockdown", value="lockdown"),
         app_commands.Choice(name="resume", value="resume"),
     ])
-    async def agent(self, interaction: discord.Interaction, action: str = "list", agent_id: str = None):
+    async def agents(self, interaction: discord.Interaction, action: str = "list", agent_id: str = None):
         await interaction.response.defer()
         if action == "list":
             agents = self.bot.db.get_agents()
