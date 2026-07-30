@@ -1,0 +1,6 @@
+{
+    "bot_url": "https://mobile-sec-monitor.onrender.com",
+    "api_key": "1234",
+    "agent_id": "my-phone",
+    "scan_interval": 30
+}
