@@ -43,7 +43,6 @@ class Database:
     def _init_tables(self):
 
         self.conn.executescript("""
-
         CREATE TABLE IF NOT EXISTS alerts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT,
@@ -55,127 +54,74 @@ class Database:
             device_info TEXT
         );
 
-
         CREATE TABLE IF NOT EXISTS agents (
-
             agent_id TEXT PRIMARY KEY,
-
             last_heartbeat TEXT,
-
             device_info TEXT,
-
             status TEXT DEFAULT 'offline',
-
-            registered_at TEXT DEFAULT
-            (datetime('now'))
-
+            registered_at TEXT DEFAULT (datetime('now'))
         );
-
 
         CREATE TABLE IF NOT EXISTS commands (
-
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-
             agent_id TEXT,
-
             command TEXT,
-
             status TEXT DEFAULT 'pending',
-
-            created_at TEXT DEFAULT
-            (datetime('now'))
-
+            created_at TEXT DEFAULT (datetime('now'))
         );
-
 
         CREATE TABLE IF NOT EXISTS blocked_numbers (
-
             number TEXT PRIMARY KEY,
-
-            added_at TEXT DEFAULT
-            (datetime('now'))
-
+            added_at TEXT DEFAULT (datetime('now'))
         );
-
 
         CREATE TABLE IF NOT EXISTS whitelisted_apps (
-
             package TEXT PRIMARY KEY,
-
-            added_at TEXT DEFAULT
-            (datetime('now'))
-
+            added_at TEXT DEFAULT (datetime('now'))
         );
 
-
         CREATE INDEX IF NOT EXISTS idx_alerts_ts
-
         ON alerts(timestamp);
-
-
         """)
-
 
         self.conn.commit()
 
 
-
     def _migrate_tables(self):
 
-        """
-        Fix old Render SQLite databases.
-        """
+        c = self.conn.cursor()
 
-        cursor = self.conn.cursor()
-
-
-        cursor.execute(
+        c.execute(
             "PRAGMA table_info(agents)"
         )
 
-
         columns = {
             row["name"]
-            for row in cursor.fetchall()
+            for row in c.fetchall()
         }
 
-
         if "status" not in columns:
-
-            logger.info(
-                "Adding missing agents.status column"
-            )
-
-            cursor.execute(
+            c.execute(
                 """
                 ALTER TABLE agents
                 ADD COLUMN status TEXT DEFAULT 'offline'
                 """
             )
 
-
         if "registered_at" not in columns:
-
-            logger.info(
-                "Adding missing agents.registered_at column"
-            )
-
-            cursor.execute(
+            c.execute(
                 """
                 ALTER TABLE agents
                 ADD COLUMN registered_at TEXT
                 """
             )
 
-
         self.conn.commit()
 
 
-
-    def save_alert(self, alert: dict) -> int:
+    def save_alert(self, alert: dict):
 
         c = self.conn.cursor()
-
 
         c.execute(
             """
@@ -189,62 +135,35 @@ class Database:
                 agent_id,
                 device_info
             )
-
             VALUES (?,?,?,?,?,?,?)
             """,
-
             (
-
-                alert.get(
-                    "title",
-                    "Alert"
-                ),
-
-                alert.get(
-                    "description",
-                    ""
-                ),
-
-                alert.get(
-                    "severity",
-                    "MEDIUM"
-                ),
-
+                alert.get("title","Alert"),
+                alert.get("description",""),
+                alert.get("severity","MEDIUM"),
                 alert.get(
                     "timestamp",
-                    time.strftime(
-                        "%Y-%m-%dT%H:%M:%S"
-                    )
+                    time.strftime("%Y-%m-%dT%H:%M:%S")
                 ),
-
                 json.dumps(
-                    alert.get(
-                        "details",
-                        {}
-                    )
+                    alert.get("details",{})
                 ),
-
                 alert.get(
                     "agent_id",
                     "unknown"
                 ),
-
                 json.dumps(
                     alert.get(
                         "device_info",
                         {}
                     )
                 )
-
             )
         )
 
-
         self.conn.commit()
 
-
         return c.lastrowid
-
 
 
     def get_alerts(
@@ -256,109 +175,53 @@ class Database:
 
         c = self.conn.cursor()
 
-
         query = """
         SELECT *
         FROM alerts
         WHERE 1=1
         """
 
-        params = []
-
+        params=[]
 
         if severity:
-
-            query += """
-            AND severity=?
-            """
-
+            query += " AND severity=?"
             params.append(
                 severity.upper()
             )
 
-
         if agent_id:
-
-            query += """
-            AND agent_id=?
-            """
-
+            query += " AND agent_id=?"
             params.append(
                 agent_id
             )
-
 
         query += """
         ORDER BY timestamp DESC
         LIMIT ?
         """
 
-        params.append(
-            limit
-        )
-
+        params.append(limit)
 
         c.execute(
             query,
             params
         )
 
-
         return [
-            dict(row)
-            for row in c.fetchall()
+            dict(x)
+            for x in c.fetchall()
         ]
-
-
-
-    def get_alerts_recent(
-        self,
-        hours=24
-    ):
-
-        cutoff = (
-            datetime.utcnow()
-            -
-            timedelta(hours=hours)
-        ).isoformat()
-
-
-        c = self.conn.cursor()
-
-
-        c.execute(
-            """
-            SELECT *
-            FROM alerts
-            WHERE timestamp >= ?
-            ORDER BY timestamp DESC
-            """,
-            (cutoff,)
-        )
-
-
-        return [
-            dict(row)
-            for row in c.fetchall()
-        ]
-
 
 
     def count_alerts(self):
 
-        c = self.conn.cursor()
+        c=self.conn.cursor()
 
         c.execute(
-            """
-            SELECT COUNT(*) AS c
-            FROM alerts
-            """
+            "SELECT COUNT(*) AS c FROM alerts"
         )
 
-
         return c.fetchone()["c"]
-
-        HEAD
 
 
     def register_agent(
@@ -369,13 +232,11 @@ class Database:
 
         try:
 
-            c = self.conn.cursor()
+            c=self.conn.cursor()
 
-
-            info = json.dumps(
+            info=json.dumps(
                 device_info or {}
             )
-
 
             c.execute(
                 """
@@ -386,7 +247,6 @@ class Database:
                     device_info,
                     status
                 )
-
                 VALUES
                 (
                     ?,
@@ -396,7 +256,6 @@ class Database:
                 )
 
                 ON CONFLICT(agent_id)
-
                 DO UPDATE SET
 
                     last_heartbeat=datetime('now'),
@@ -404,17 +263,13 @@ class Database:
                     device_info=?,
 
                     status='online'
-
                 """,
-
                 (
                     agent_id,
                     info,
                     info
                 )
-
             )
-
 
             self.conn.commit()
 
@@ -429,11 +284,9 @@ class Database:
             raise
 
 
-
     def get_agents(self):
 
-        c = self.conn.cursor()
-
+        c=self.conn.cursor()
 
         c.execute(
             """
@@ -443,21 +296,18 @@ class Database:
             """
         )
 
-
         return [
-            dict(row)
-            for row in c.fetchall()
+            dict(x)
+            for x in c.fetchall()
         ]
-
 
 
     def get_agent(
         self,
-        agent_id: str
+        agent_id:str
     ) -> Optional[dict]:
 
-        c = self.conn.cursor()
-
+        c=self.conn.cursor()
 
         c.execute(
             """
@@ -468,16 +318,9 @@ class Database:
             (agent_id,)
         )
 
+        row=c.fetchone()
 
-        row = c.fetchone()
-
-
-        return (
-            dict(row)
-            if row
-            else None
-        )
-
+        return dict(row) if row else None
 
 
     def queue_command(
@@ -493,7 +336,6 @@ class Database:
                 agent_id,
                 command
             )
-
             VALUES (?,?)
             """,
             (
@@ -502,26 +344,7 @@ class Database:
             )
         )
 
-
         self.conn.commit()
-=======
-    def register_agent(self, agent_id: str, device_info: dict = None):
-    c = self.conn.cursor()
-
-    info = json.dumps(device_info or {})
-
-    c.execute("""
-        INSERT INTO agents
-        (agent_id, last_heartbeat, device_info, status)
-        VALUES (?, datetime('now'), ?, 'online')
-        ON CONFLICT(agent_id)
-        DO UPDATE SET
-            last_heartbeat=datetime('now'),
-            device_info=?,
-            status='online'
-    """, (agent_id, info, info))
-
-    self.conn.commit()
 
 
     def get_pending_commands(
@@ -529,8 +352,7 @@ class Database:
         agent_id
     ):
 
-        c = self.conn.cursor()
-
+        c=self.conn.cursor()
 
         c.execute(
             """
@@ -543,12 +365,10 @@ class Database:
             (agent_id,)
         )
 
-
-        cmds = [
-            dict(row)
-            for row in c.fetchall()
+        cmds=[
+            dict(x)
+            for x in c.fetchall()
         ]
-
 
         for cmd in cmds:
 
@@ -561,12 +381,9 @@ class Database:
                 (cmd["id"],)
             )
 
-
         self.conn.commit()
 
-
         return cmds
-
 
 
     def add_blocked_number(
@@ -582,9 +399,7 @@ class Database:
             (number,)
         )
 
-
         self.conn.commit()
-
 
 
     def add_whitelisted_app(
@@ -599,6 +414,5 @@ class Database:
             """,
             (package,)
         )
-
 
         self.conn.commit()
