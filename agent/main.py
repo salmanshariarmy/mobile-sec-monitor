@@ -22,6 +22,7 @@ class AgentConfig:
 class MonitorUI(BoxLayout):
 
     def __init__(self, **kwargs):
+
         super().__init__(
             orientation="vertical",
             spacing=20,
@@ -37,9 +38,10 @@ class MonitorUI(BoxLayout):
         self.add_widget(self.status_label)
 
 
+        # Heartbeat test button
         self.test_button = Button(
             text="Test Render Connection",
-            size_hint_y=0.3,
+            size_hint_y=0.25,
         )
 
         self.test_button.bind(
@@ -49,17 +51,36 @@ class MonitorUI(BoxLayout):
         self.add_widget(self.test_button)
 
 
+        # Alert test button
+        self.alert_button = Button(
+            text="Send Test Alert",
+            size_hint_y=0.25,
+        )
+
+        self.alert_button.bind(
+            on_press=self.send_test_alert
+        )
+
+        self.add_widget(self.alert_button)
+
+
+
     def set_status(self, message):
+
         self.status_label.text = message
 
 
+
+    # ===============================
+    # HEARTBEAT TEST
+    # ===============================
 
     def test_connection(self, _instance=None):
 
         self.test_button.disabled = True
 
         self.set_status(
-            "Connecting to Render..."
+            "Testing heartbeat..."
         )
 
 
@@ -84,14 +105,18 @@ class MonitorUI(BoxLayout):
                 json={
                     "device_info": {
                         "platform": "android",
-                        "status": "APK connection test"
+                        "status": "APK heartbeat test"
                     }
                 },
 
                 headers={
+
                     "X-API-Key": API_KEY,
+
                     "X-Agent-ID": AGENT_ID,
+
                     "Content-Type": "application/json",
+
                 },
 
                 timeout=20
@@ -99,7 +124,8 @@ class MonitorUI(BoxLayout):
 
 
             message = (
-                f"Render response: HTTP {response.status_code}\n"
+                f"Heartbeat:\n"
+                f"HTTP {response.status_code}\n"
                 f"{response.text[:200]}"
             )
 
@@ -107,7 +133,7 @@ class MonitorUI(BoxLayout):
         except Exception:
 
             message = (
-                "Connection failed:\n"
+                "Heartbeat failed:\n"
                 +
                 traceback.format_exc()[-700:]
             )
@@ -119,6 +145,110 @@ class MonitorUI(BoxLayout):
             self.finish_test(message),
 
             0
+
+        )
+
+
+
+    # ===============================
+    # ALERT TEST
+    # ===============================
+
+    def send_test_alert(self, _instance=None):
+
+        self.alert_button.disabled = True
+
+        self.set_status(
+            "Sending alert..."
+        )
+
+
+        threading.Thread(
+
+            target=self._alert_worker,
+
+            daemon=True
+
+        ).start()
+
+
+
+    def _alert_worker(self):
+
+        try:
+
+            import requests
+
+
+            response = requests.post(
+
+                f"{BOT_URL.rstrip('/')}/alert",
+
+                json={
+
+                    "title": "APK Test Alert",
+
+                    "description":
+                    "Security Monitor test alert from Android",
+
+                    "severity": "HIGH",
+
+                    "device_info": {
+
+                        "agent_id": AGENT_ID,
+
+                        "platform": "android"
+
+                    }
+
+                },
+
+                headers={
+
+                    "X-API-Key": API_KEY,
+
+                    "X-Agent-ID": AGENT_ID,
+
+                    "Content-Type": "application/json"
+
+                },
+
+                timeout=20
+
+            )
+
+
+            message = (
+
+                f"Alert:\n"
+
+                f"HTTP {response.status_code}\n"
+
+                f"{response.text[:200]}"
+
+            )
+
+
+        except Exception:
+
+            message = (
+
+                "Alert failed:\n"
+
+                +
+
+                traceback.format_exc()[-700:]
+
+            )
+
+
+        Clock.schedule_once(
+
+            lambda dt:
+            self.finish_alert(message),
+
+            0
+
         )
 
 
@@ -131,6 +261,14 @@ class MonitorUI(BoxLayout):
 
 
 
+    def finish_alert(self, message):
+
+        self.set_status(message)
+
+        self.alert_button.disabled = False
+
+
+
 
 
 class SecurityMonitorApp(App):
@@ -138,7 +276,7 @@ class SecurityMonitorApp(App):
 
     def build(self):
 
-        # Start background security agent
+        # Start background monitoring agent
 
         threading.Thread(
 
@@ -163,12 +301,9 @@ class SecurityMonitorApp(App):
 
             )
 
-
         except Exception:
 
             traceback.print_exc()
-
-
 
 
 
