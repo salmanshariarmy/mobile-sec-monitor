@@ -16,7 +16,7 @@ source.dir = agent/
 source.include_exts = py,png,jpg,kv,atlas,txt,json
 
 # (list) Requirements — Python modules
-requirements = python3,requests,phonenumbers,android,plyer
+requirements = python3==3.13.5,hostpython3==3.13.5,kivy,requests,phonenumbers,android,plyer
 
 # (str) Application versioning
 version = 1.0.0
@@ -93,8 +93,6 @@ android.log_loglevel = 2
 # (bool) Copy library instead of making a libs symlink
 android.copy_libs = 1
 
-# (list) The Android Java added jar file
-android.add_src =
 
 # (str) Python for android branch
 android.p4a_branch = master
