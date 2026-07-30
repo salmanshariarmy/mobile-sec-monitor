@@ -2,8 +2,8 @@
 """
 Mobile Security Monitor — Background Agent for APK.
 
-Starts the monitoring components, sends alerts and heartbeats,
-and shuts down cleanly when the stop event is triggered.
+Starts monitoring modules, sends alerts/heartbeats,
+and shuts down cleanly using stop_event.
 """
 
 import logging
@@ -26,17 +26,19 @@ def run_agent(
     config: Any,
     stop_event: Optional[threading.Event] = None,
 ) -> None:
-    """
-    Start all security monitoring components.
-    """
 
     if stop_event is None:
         stop_event = threading.Event()
 
-    bot_url = str(config.bot_url).rstrip("/")
+
+    bot_url = str(
+        config.bot_url
+    ).rstrip("/")
+
 
     session = requests.Session()
     session.verify = True
+
 
     headers = {
         "X-API-Key": str(config.api_key),
@@ -44,55 +46,56 @@ def run_agent(
         "Content-Type": "application/json",
     }
 
+
     logger.info(
-        "Security agent %s starting.",
+        "Starting security agent: %s",
         config.agent_id,
     )
 
 
     def get_device_info() -> Dict[str, Any]:
-        """
-        Safely retrieve device information.
-        """
-
-        get_info = getattr(
-            config,
-            "get_device_info",
-            None,
-        )
-
-        if not callable(get_info):
-            return {}
 
         try:
-            info = get_info()
 
-            if isinstance(info, dict):
-                return info
-
-            return {}
-
-        except Exception:
-            logger.exception(
-                "Unable to get device information."
+            method = getattr(
+                config,
+                "get_device_info",
+                None,
             )
 
-            return {}
+
+            if callable(method):
+
+                result = method()
+
+                if isinstance(result, dict):
+                    return result
+
+
+        except Exception:
+
+            logger.exception(
+                "Failed retrieving device information."
+            )
+
+
+        return {}
+
 
 
     def send_alert(
-        alert: Dict[str, Any],
+        alert: Dict[str, Any]
     ) -> None:
-        """
-        Send alert to server.
-        """
+
 
         if not isinstance(alert, dict):
+
             logger.warning(
-                "Invalid alert ignored: %s",
-                alert,
+                "Invalid alert ignored."
             )
+
             return
+
 
 
         severity = str(
@@ -103,16 +106,16 @@ def run_agent(
         ).upper()
 
 
-        allowed_severity = {
+
+        if severity not in {
             "LOW",
             "MEDIUM",
             "HIGH",
             "CRITICAL",
-        }
+        }:
 
-
-        if severity not in allowed_severity:
             severity = "MEDIUM"
+
 
 
         details = alert.get(
@@ -122,18 +125,22 @@ def run_agent(
 
 
         if not isinstance(details, dict):
+
             details = {
                 "value": str(details)
             }
 
 
+
         payload = {
+
             "title": str(
                 alert.get(
                     "title",
                     "Security Alert",
                 )
             )[:200],
+
 
             "description": str(
                 alert.get(
@@ -142,7 +149,9 @@ def run_agent(
                 )
             )[:4000],
 
+
             "severity": severity,
+
 
             "timestamp": alert.get(
                 "timestamp",
@@ -152,14 +161,18 @@ def run_agent(
                 ),
             ),
 
+
             "details": details,
 
-            # Server will enforce authenticated agent ID
+
             "device_info": get_device_info(),
+
         }
 
 
+
         try:
+
             response = session.post(
                 f"{bot_url}/alert",
                 json=payload,
@@ -175,17 +188,16 @@ def run_agent(
             ):
 
                 logger.info(
-                    "Alert sent [%s] %s",
-                    severity,
+                    "Alert sent: %s",
                     payload["title"],
                 )
+
 
             else:
 
                 logger.warning(
-                    "Alert failed %s: %s",
+                    "Alert failed %s",
                     response.status_code,
-                    response.text[:300],
                 )
 
 
@@ -198,21 +210,24 @@ def run_agent(
 
 
 
-    def send_heartbeat() -> None:
-        """
-        Send heartbeat every 60 seconds.
-        """
+
+    def send_heartbeat():
 
         while not stop_event.is_set():
 
+
             payload = {
+
                 "device_info": get_device_info(),
+
 
                 "timestamp": time.strftime(
                     "%Y-%m-%dT%H:%M:%SZ",
                     time.gmtime(),
                 ),
+
             }
+
 
 
             try:
@@ -232,26 +247,26 @@ def run_agent(
                 ):
 
                     logger.warning(
-                        "Heartbeat failed %s: %s",
+                        "Heartbeat failed: %s",
                         response.status_code,
-                        response.text[:300],
                     )
 
 
             except requests.RequestException as error:
 
                 logger.warning(
-                    "Heartbeat connection failed: %s",
+                    "Heartbeat error: %s",
                     error,
                 )
 
 
-            # Wait but allow immediate shutdown
+
             stop_event.wait(60)
 
 
 
-    monitor_definitions = [
+
+    monitors = [
 
         (
             "Camera",
@@ -276,25 +291,49 @@ def run_agent(
     ]
 
 
+
     monitor_instances = []
 
     monitor_threads = []
 
 
-    for name, monitor_class in monitor_definitions:
+
+    for name, monitor_class in monitors:
+
 
         try:
 
-            monitor = monitor_class(
-                send_alert,
-                config,
-                stop_event,
-            )
+
+            try:
+
+                # New version
+                monitor = monitor_class(
+                    send_alert,
+                    config,
+                    stop_event,
+                )
+
+
+            except TypeError:
+
+                # Backward compatibility
+                logger.warning(
+                    "%s does not support stop_event yet.",
+                    name,
+                )
+
+
+                monitor = monitor_class(
+                    send_alert,
+                    config,
+                )
+
 
 
             monitor_instances.append(
                 monitor
             )
+
 
 
             thread = threading.Thread(
@@ -305,7 +344,6 @@ def run_agent(
 
 
             thread.start()
-
 
             monitor_threads.append(
                 thread
@@ -318,12 +356,15 @@ def run_agent(
             )
 
 
+
         except Exception:
 
+
             logger.exception(
-                "Unable to start %s monitor.",
+                "Failed starting %s monitor.",
                 name,
             )
+
 
 
 
@@ -339,9 +380,9 @@ def run_agent(
 
 
     logger.info(
-        "%s/%s monitors active.",
+        "%d/%d monitors active.",
         len(monitor_threads),
-        len(monitor_definitions),
+        len(monitors),
     )
 
 
@@ -356,8 +397,9 @@ def run_agent(
 
     except KeyboardInterrupt:
 
+
         logger.info(
-            "Keyboard interrupt received."
+            "Keyboard interrupt."
         )
 
         stop_event.set()
@@ -366,8 +408,9 @@ def run_agent(
 
     finally:
 
+
         logger.info(
-            "Stopping security monitors."
+            "Stopping monitors."
         )
 
 
@@ -377,24 +420,25 @@ def run_agent(
 
         for monitor in monitor_instances:
 
-            stop_method = getattr(
+
+            stop = getattr(
                 monitor,
                 "stop",
                 None,
             )
 
 
-            if callable(stop_method):
+            if callable(stop):
 
                 try:
 
-                    stop_method()
+                    stop()
 
 
                 except Exception:
 
                     logger.exception(
-                        "Monitor shutdown failed."
+                        "Monitor stop failed."
                     )
 
 
@@ -416,6 +460,7 @@ def run_agent(
 
 
         session.close()
+
 
 
         logger.info(
