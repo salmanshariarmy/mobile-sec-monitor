@@ -51,3 +51,37 @@ class Config:
             "{}"
         )
     )
+
+
+    @classmethod
+    def validate(cls):
+
+        errors = []
+
+        if not cls.BOT_TOKEN:
+            errors.append(
+                "DISCORD_BOT_TOKEN is required"
+            )
+
+        if not cls.GUILD_ID:
+            errors.append(
+                "GUILD_ID is required"
+            )
+
+        if not cls.ALERT_CHANNEL_ID:
+            errors.append(
+                "ALERT_CHANNEL_ID is required"
+            )
+
+        if not cls.HTTP_API_KEY:
+            errors.append(
+                "HTTP_API_KEY is required"
+            )
+
+        if errors:
+            raise ValueError(
+                "Config errors:\n" +
+                "\n".join(errors)
+            )
+
+        return True
